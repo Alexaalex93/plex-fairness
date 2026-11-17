@@ -1,0 +1,37 @@
+services:
+  plex-fairness-db:
+    image: postgres:16-alpine
+    container_name: plex-fairness-db
+    environment:
+      POSTGRES_DB: plexfair
+      POSTGRES_USER: plexfair
+      POSTGRES_PASSWORD: change_me
+    volumes:
+      - /mnt/user/appdata/plex-fairness/db:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"          # Grafana connects here (NAS_IP:5433)
+    restart: unless-stopped
+
+  plex-fairness-collector:
+    image: ghcr.io/alexaalex93/plex-fairness:latest
+    container_name: plex-fairness-collector
+    runtime: nvidia         # needed for nvidia-smi, remove it if you don't want GPU stats
+    environment:
+      TAUTULLI_URL: http://192.168.1.10:8181      # your Tautulli
+      TAUTULLI_APIKEY: put_your_api_key_here
+      PG_DSN: postgresql://plexfair:change_me@plex-fairness-db:5432/plexfair
+      POLL_SECONDS: "30"
+      RETENTION_DAYS: "180"
+      # Plex container path -> same folder mounted here (to know which disk each file is on)
+      PATH_MAP_FROM: /data
+      PATH_MAP_TO: /host_user/media
+      NVIDIA_VISIBLE_DEVICES: all                 # or the GPU UUID you use in Plex
+      NVIDIA_DRIVER_CAPABILITIES: utility
+    volumes:
+      - /mnt/user:/host_user:ro
+      - /var/local/emhttp:/host_emhttp:ro
+    ports:
+      - "8787:8787"          # Tautulli webhook for buffer warnings
+    depends_on:
+      - plex-fairness-db
+    restart: unless-stopped
