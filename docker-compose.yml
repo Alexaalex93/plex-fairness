@@ -35,3 +35,21 @@ services:
     depends_on:
       - plex-fairness-db
     restart: unless-stopped
+
+  plex-fairness-grafana:
+    image: ghcr.io/alexaalex93/plex-fairness-grafana:latest
+    container_name: plex-fairness-grafana
+    environment:
+      PLEXFAIR_DB_PASSWORD: change_me          # same as POSTGRES_PASSWORD
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: change_me_too
+    volumes:
+      - plex-fairness-grafana-data:/var/lib/grafana
+    ports:
+      - "6002:3000"
+    depends_on:
+      - plex-fairness-db
+    restart: unless-stopped
+
+volumes:
+  plex-fairness-grafana-data:

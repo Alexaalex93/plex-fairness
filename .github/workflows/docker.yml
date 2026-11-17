@@ -1,6 +1,6 @@
-# Builds the image on every push to main and publishes it to GHCR,
+# Builds both images on every push to main and publishes them to GHCR,
 # so on the NAS I only need to do a docker compose pull.
-name: Build and push image
+name: Build and push images
 
 on:
   push:
@@ -27,10 +27,20 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: docker/build-push-action@v6
+      - name: Collector image
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: true
           tags: |
             ${{ env.IMAGE }}:latest
             ${{ env.IMAGE }}:${{ github.sha }}
+
+      - name: Grafana image (datasource + dashboard baked in)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./grafana
+          push: true
+          tags: |
+            ${{ env.IMAGE }}-grafana:latest
+            ${{ env.IMAGE }}-grafana:${{ github.sha }}

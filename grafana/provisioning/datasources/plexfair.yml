@@ -1,0 +1,16 @@
+# Datasource created automatically on startup, so nothing has to be clicked in the UI.
+# The password comes from the PLEXFAIR_DB_PASSWORD env var of the container.
+apiVersion: 1
+datasources:
+  - name: plexfair
+    uid: plexfair
+    type: grafana-postgresql-datasource
+    url: plex-fairness-db:5432
+    user: plexfair
+    isDefault: true
+    jsonData:
+      database: plexfair
+      sslmode: disable
+      postgresVersion: 1600
+    secureJsonData:
+      password: $PLEXFAIR_DB_PASSWORD
