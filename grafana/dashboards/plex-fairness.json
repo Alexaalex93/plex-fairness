@@ -1,5 +1,5 @@
 {
-  "title": "Plex - Rendimiento y justicia del reparto",
+  "title": "Plex - Rendimiento y calidad",
   "uid": "plex-fairness",
   "timezone": "Europe/Madrid",
   "time": {
@@ -23,10 +23,10 @@
       {
         "name": "jain_threshold",
         "type": "custom",
-        "query": "0.6,0.7,0.8,0.9",
-        "label": "Umbral Jain",
+        "query": "60 : 0.6,70 : 0.7,80 : 0.8,90 : 0.9",
+        "label": "Umbral de equidad %",
         "current": {
-          "text": "0.8",
+          "text": "80",
           "value": "0.8"
         },
         "options": []
@@ -410,7 +410,7 @@
       "id": 19,
       "type": "table",
       "title": "Especificaciones del sistema",
-      "description": "",
+      "description": "Lo que tiene la máquina. Se actualiza al arrancar el colector y una vez al día.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "plexfair"
@@ -444,7 +444,7 @@
       "id": 20,
       "type": "timeseries",
       "title": "CPU por contenedor (% de toda la máquina)",
-      "description": "",
+      "description": "Los 8 contenedores que más CPU usan. Sirve para ver si otro contenedor le quita recursos a Plex.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "plexfair"
@@ -553,7 +553,7 @@
     {
       "id": 22,
       "type": "row",
-      "title": "Justicia del reparto entre usuarios",
+      "title": "Calidad y equidad por usuario",
       "collapsed": false,
       "panels": [],
       "gridPos": {
@@ -566,8 +566,8 @@
     {
       "id": 1,
       "type": "timeseries",
-      "title": "Justicia del reparto (índice de Jain)",
-      "description": "1 = todos reciben lo mismo. 'Calidad' compara la calidad servida frente a la original de cada uno; es la métrica buena. Solo se calcula con 2+ personas reproduciendo.",
+      "title": "Equidad entre usuarios: ¿reciben todos la misma calidad?",
+      "description": "100 % = todos los que están viendo algo a la vez reciben la misma proporción de su calidad original. Cuanto más baja, más sale perdiendo alguien frente a los demás. Solo se calcula cuando hay 2 o más personas reproduciendo.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "plexfair"
@@ -588,7 +588,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroupAlias(ts, '1m'), avg(jain_quality) AS \"Jain calidad\", avg(jain_bandwidth) AS \"Jain ancho de banda\"\nFROM poll WHERE $__timeFilter(ts) GROUP BY 1 ORDER BY 1"
+          "rawSql": "SELECT $__timeGroupAlias(ts, '1m'), avg(jain_quality) AS \"Equidad de calidad\"\nFROM poll WHERE $__timeFilter(ts) GROUP BY 1 ORDER BY 1"
         }
       ],
       "fieldConfig": {
@@ -641,7 +641,7 @@
       "id": 2,
       "type": "timeseries",
       "title": "Ancho de banda por usuario",
-      "description": "",
+      "description": "Mbps que recibe cada usuario mientras reproduce.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "plexfair"
@@ -696,7 +696,7 @@
       "id": 3,
       "type": "timeseries",
       "title": "Calidad servida / original por usuario",
-      "description": "",
+      "description": "100 % = le llega la calidad original (direct play). Si transcodifica, la proporción de bitrate que le llega.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "plexfair"
@@ -822,7 +822,7 @@
       "id": 5,
       "type": "timeseries",
       "title": "GPU (RTX 2060) vs transcodes",
-      "description": "",
+      "description": "Uso del codificador (NVENC) y decodificador (NVDEC) de la GPU junto al número de transcodes.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "plexfair"
@@ -985,7 +985,7 @@
       "id": 8,
       "type": "table",
       "title": "Resumen por usuario",
-      "description": "",
+      "description": "Por usuario en el periodo: horas vistas, % del tiempo con transcode, calidad media recibida, % del tiempo con transcode lento (<1x), Mbps medio y avisos de buffer.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "plexfair"
@@ -1018,8 +1018,8 @@
     {
       "id": 9,
       "type": "table",
-      "title": "Momentos injustos (Jain < umbral)",
-      "description": "Cada fila es un muestreo en el que el reparto fue malo; el detalle muestra % de calidad, decisión y velocidad de transcode de cada usuario.",
+      "title": "Momentos en que alguien salió perdiendo",
+      "description": "Muestreos en los que la equidad bajó del umbral. El detalle muestra, por usuario: % de calidad recibida, si hacía direct play o transcode, y velocidad del transcode.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "plexfair"
@@ -1040,7 +1040,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT p.ts AS \"Momento\", p.playing AS \"Reproduciendo\", round(p.jain_quality::numeric, 2) AS \"Jain\",\n  round(p.gpu_enc_util::numeric) AS \"NVENC %\",\n  string_agg(s.user_name || ' ' || round(100 * coalesce(s.quality_ratio, 0))::text || '% '\n             || coalesce(s.video_decision, '') || coalesce(' x' || s.transcode_speed::text, ''), ' | ' ORDER BY s.quality_ratio) AS \"Detalle\"\nFROM poll p JOIN session_sample s ON s.ts = p.ts AND s.state = 'playing'\nWHERE $__timeFilter(p.ts) AND p.jain_quality < $jain_threshold\nGROUP BY p.ts, p.playing, p.jain_quality, p.gpu_enc_util ORDER BY p.ts DESC LIMIT 300"
+          "rawSql": "SELECT p.ts AS \"Momento\", p.playing AS \"Reproduciendo\", round(100 * p.jain_quality)::int AS \"Equidad %\",\n  round(p.gpu_enc_util::numeric) AS \"NVENC %\",\n  string_agg(s.user_name || ' ' || round(100 * coalesce(s.quality_ratio, 0))::text || '% '\n             || coalesce(s.video_decision, '') || coalesce(' x' || s.transcode_speed::text, ''), ' | ' ORDER BY s.quality_ratio) AS \"Detalle\"\nFROM poll p JOIN session_sample s ON s.ts = p.ts AND s.state = 'playing'\nWHERE $__timeFilter(p.ts) AND p.jain_quality < $jain_threshold\nGROUP BY p.ts, p.playing, p.jain_quality, p.gpu_enc_util ORDER BY p.ts DESC LIMIT 300"
         }
       ],
       "fieldConfig": {
@@ -1053,7 +1053,7 @@
       "id": 10,
       "type": "table",
       "title": "Concurrencia media por día y hora",
-      "description": "",
+      "description": "Media de personas reproduciendo a la vez en cada franja. La columna Pico es el máximo.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "plexfair"
@@ -1115,7 +1115,7 @@
       "id": 11,
       "type": "table",
       "title": "Eventos de buffer",
-      "description": "",
+      "description": "Avisos de buffer que manda Tautulli por webhook (si lo tienes configurado).",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "plexfair"

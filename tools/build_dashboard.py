@@ -11,7 +11,7 @@ Q = {
 "bw_user": """SELECT $__timeGroupAlias(ts, '1m'), user_name AS metric, avg(bandwidth_kbps)/1000.0 AS value
 FROM session_sample WHERE $__timeFilter(ts) AND state = 'playing'
 GROUP BY 1, 2 ORDER BY 1""",
-"jain": """SELECT $__timeGroupAlias(ts, '1m'), avg(jain_quality) AS "Jain calidad", avg(jain_bandwidth) AS "Jain ancho de banda"
+"jain": """SELECT $__timeGroupAlias(ts, '1m'), avg(jain_quality) AS "Equidad de calidad"
 FROM poll WHERE $__timeFilter(ts) GROUP BY 1 ORDER BY 1""",
 "quality_user": """SELECT $__timeGroupAlias(ts, '1m'), user_name AS metric, avg(quality_ratio) AS value
 FROM session_sample WHERE $__timeFilter(ts) AND state = 'playing'
@@ -45,7 +45,7 @@ GROUP BY s.user_name ORDER BY 2 DESC""",
 FROM (SELECT extract(isodow FROM ts AT TIME ZONE '{TZ}')::int AS d, extract(hour FROM ts AT TIME ZONE '{TZ}')::int AS h, playing
       FROM poll WHERE $__timeFilter(ts)) x
 GROUP BY h ORDER BY h""",
-"unfair": """SELECT p.ts AS "Momento", p.playing AS "Reproduciendo", round(p.jain_quality::numeric, 2) AS "Jain",
+"unfair": """SELECT p.ts AS "Momento", p.playing AS "Reproduciendo", round(100 * p.jain_quality)::int AS "Equidad %",
   round(p.gpu_enc_util::numeric) AS "NVENC %",
   string_agg(s.user_name || ' ' || round(100 * coalesce(s.quality_ratio, 0))::text || '% '
              || coalesce(s.video_decision, '') || coalesce(' x' || s.transcode_speed::text, ''), ' | ' ORDER BY s.quality_ratio) AS "Detalle"
@@ -143,27 +143,33 @@ def thresholds(*steps):
     return {"thresholds": {"mode": "absolute", "steps": [{"color": c, "value": v} for v, c in steps]}}
 
 panels = [
-  panel("Justicia del reparto (índice de Jain)", "jain", "timeseries", 0, 0, 24, 8, unit="percentunit",
-        desc="1 = todos reciben lo mismo. 'Calidad' compara la calidad servida frente a la original de cada uno; es la métrica buena. Solo se calcula con 2+ personas reproduciendo.",
+  panel("Equidad entre usuarios: ¿reciben todos la misma calidad?", "jain", "timeseries", 0, 0, 24, 8, unit="percentunit",
+        desc="100 % = todos los que están viendo algo a la vez reciben la misma proporción de su calidad original. Cuanto más baja, más sale perdiendo alguien frente a los demás. Solo se calcula cuando hay 2 o más personas reproduciendo.",
         field_extra={"min": 0, "max": 1, **thresholds((None, "red"), (0.7, "orange"), (0.9, "green"))}),
-  panel("Ancho de banda por usuario", "bw_user", "timeseries", 0, 8, 12, 9, unit="Mbits"),
+  panel("Ancho de banda por usuario", "bw_user", "timeseries", 0, 8, 12, 9, unit="Mbits",
+        desc="Mbps que recibe cada usuario mientras reproduce."),
   panel("Calidad servida / original por usuario", "quality_user", "timeseries", 12, 8, 12, 9, unit="percentunit",
+        desc="100 % = le llega la calidad original (direct play). Si transcodifica, la proporción de bitrate que le llega.",
         field_extra={"min": 0, "max": 1}),
   panel("Velocidad de transcode (<1 = cortes)", "speed_user", "timeseries", 0, 17, 12, 9, unit="x",
         desc="Mínimo por minuto. Por debajo de 1x Plex no llega a tiempo y el cliente se queda cargando.",
         field_extra={"min": 0, **thresholds((None, "red"), (1, "green"))}),
-  panel("GPU (RTX 2060) vs transcodes", "gpu", "timeseries", 12, 17, 12, 9),
+  panel("GPU (RTX 2060) vs transcodes", "gpu", "timeseries", 12, 17, 12, 9,
+        desc="Uso del codificador (NVENC) y decodificador (NVDEC) de la GPU junto al número de transcodes."),
   panel("Lectura por disco del array", "disk_read", "timeseries", 0, 26, 12, 9, unit="MBs",
         desc="Si dos streams leen del mismo disco compiten entre sí: el array de Unraid no reparte los datos entre discos."),
   panel("Streams simultáneos por disco", "disk_streams", "timeseries", 12, 26, 12, 9,
         desc="Disco donde está el fichero de cada stream (atributo system.LOCATION de Unraid)."),
-  panel("Resumen por usuario", "summary", "table", 0, 35, 24, 8, fmt="table"),
-  panel("Momentos injustos (Jain < umbral)", "unfair", "table", 0, 43, 24, 10, fmt="table",
-        desc="Cada fila es un muestreo en el que el reparto fue malo; el detalle muestra % de calidad, decisión y velocidad de transcode de cada usuario."),
+  panel("Resumen por usuario", "summary", "table", 0, 35, 24, 8, fmt="table",
+        desc="Por usuario en el periodo: horas vistas, % del tiempo con transcode, calidad media recibida, % del tiempo con transcode lento (<1x), Mbps medio y avisos de buffer."),
+  panel("Momentos en que alguien salió perdiendo", "unfair", "table", 0, 43, 24, 10, fmt="table",
+        desc="Muestreos en los que la equidad bajó del umbral. El detalle muestra, por usuario: % de calidad recibida, si hacía direct play o transcode, y velocidad del transcode."),
   panel("Concurrencia media por día y hora", "concurrency", "table", 0, 53, 14, 14, fmt="table",
+        desc="Media de personas reproduciendo a la vez en cada franja. La columna Pico es el máximo.",
         field_extra={"custom": {"cellOptions": {"type": "color-background", "mode": "gradient"}},
                      **thresholds((None, "transparent"), (1, "green"), (2, "orange"), (3, "red"))}),
-  panel("Eventos de buffer", "buffers", "table", 14, 53, 10, 14, fmt="table"),
+  panel("Eventos de buffer", "buffers", "table", 14, 53, 10, 14, fmt="table",
+        desc="Avisos de buffer que manda Tautulli por webhook (si lo tienes configurado)."),
 ]
 
 
@@ -198,10 +204,12 @@ capacity = [
   panel("Margen: cuántos streams más caben", "headroom", "table", 0, 28, 14, 10, fmt="table",
         desc="Estimación: consumo medio con streams menos consumo en reposo, dividido entre streams (para la GPU, entre transcodes). 'Streams extra' = cuántos más caben antes de llegar al umbral partiendo del p95. El que tenga el número más bajo será el primer cuello de botella.",
         field_extra={"custom": {"cellOptions": {"type": "auto"}}}),
-  panel("Especificaciones del sistema", "specs", "table", 14, 28, 10, 10, fmt="table"),
-  panel("CPU por contenedor (% de toda la máquina)", "cont_cpu", "timeseries", 0, 38, 12, 9, unit="percent"),
+  panel("Especificaciones del sistema", "specs", "table", 14, 28, 10, 10, fmt="table",
+        desc="Lo que tiene la máquina. Se actualiza al arrancar el colector y una vez al día."),
+  panel("CPU por contenedor (% de toda la máquina)", "cont_cpu", "timeseries", 0, 38, 12, 9, unit="percent",
+        desc="Los 8 contenedores que más CPU usan. Sirve para ver si otro contenedor le quita recursos a Plex."),
   panel("RAM por contenedor", "cont_mem", "timeseries", 12, 38, 12, 9, unit="bytes"),
-  row("Justicia del reparto entre usuarios", 47),
+  row("Calidad y equidad por usuario", 47),
 ]
 OFFSET = 48
 for p in panels:
@@ -211,12 +219,12 @@ panels = capacity + panels
 dash = {
   "__inputs": [{"name": "DS_PLEXFAIR", "label": "plexfair (PostgreSQL)", "type": "datasource",
                 "pluginId": "grafana-postgresql-datasource", "pluginName": "PostgreSQL"}],
-  "title": "Plex - Rendimiento y justicia del reparto", "uid": "plex-fairness", "timezone": TZ,
+  "title": "Plex - Rendimiento y calidad", "uid": "plex-fairness", "timezone": TZ,
   "time": {"from": "now-24h", "to": "now"}, "refresh": "1m", "schemaVersion": 39, "tags": ["plex"],
   "templating": {"list": [
     {"name": "poll", "type": "constant", "query": "30", "hide": 2, "label": "Segundos entre muestreos"},
-    {"name": "jain_threshold", "type": "custom", "query": "0.6,0.7,0.8,0.9", "label": "Umbral Jain",
-     "current": {"text": "0.8", "value": "0.8"}, "options": []},
+    {"name": "jain_threshold", "type": "custom", "query": "60 : 0.6,70 : 0.7,80 : 0.8,90 : 0.9", "label": "Umbral de equidad %",
+     "current": {"text": "80", "value": "0.8"}, "options": []},
     {"name": "crit", "type": "custom", "query": "70,80,85,90,95", "label": "Umbral cuello de botella %",
      "current": {"text": "85", "value": "85"}, "options": []},
   ]},
