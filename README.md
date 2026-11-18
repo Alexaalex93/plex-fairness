@@ -1,5 +1,13 @@
 # Plex fairness collector
 
+Además de lo de cada stream, mide:
+- **Especificaciones del sistema**: CPU, RAM, GPU, red, Internet y discos.
+- **Ocupación de cada recurso**, en % sobre su capacidad: CPU, RAM, `/dev/shm`, red, Internet, GPU (NVENC, NVDEC, VRAM y sesiones) y cada disco.
+- **El cuello de botella de cada momento** y los episodios en que algún recurso pasa del umbral.
+- **Estimación de cuántos streams más caben** antes de llegar al límite.
+
+Las gráficas se ven en Grafana, en `http://IP_NAS:6002`: es el contenedor `plex-fairness-grafana`, que ya trae la conexión y el dashboard.
+
 Muestrea Tautulli cada 30 s y guarda en Postgres:
 - **Por stream**: ancho de banda, calidad original frente a servida, decisión de transcode, velocidad del transcode y disco donde está el fichero.
 - **Del sistema**: carga de la GPU y lectura de cada disco del array.
@@ -32,3 +40,6 @@ Los umbrales del aviso se ajustan en Settings → Notifications (Buffer Warning 
 - **Momentos injustos**: cada fila dice quién iba al X % de calidad y a qué velocidad de transcode, para que veas la causa.
 - **Velocidad de transcode < 1x a la vez que NVENC alto**: el límite es la GPU.
 - **Varios streams en el mismo disco y ese disco cerca del 100 %**: el límite es el disco.
+
+## Regenerar el dashboard
+Las consultas y los paneles están en `tools/build_dashboard.py`. Para regenerar los dos JSON, ejecuta desde la raíz del repo `python3 tools/build_dashboard.py`.

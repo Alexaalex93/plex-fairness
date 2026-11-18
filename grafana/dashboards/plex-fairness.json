@@ -1,5 +1,5 @@
 {
-  "title": "Plex - Justicia del reparto",
+  "title": "Plex - Rendimiento y justicia del reparto",
   "uid": "plex-fairness",
   "timezone": "Europe/Madrid",
   "time": {
@@ -30,10 +30,539 @@
           "value": "0.8"
         },
         "options": []
+      },
+      {
+        "name": "crit",
+        "type": "custom",
+        "query": "70,80,85,90,95",
+        "label": "Umbral cuello de botella %",
+        "current": {
+          "text": "85",
+          "value": "85"
+        },
+        "options": []
       }
     ]
   },
   "panels": [
+    {
+      "id": 12,
+      "type": "row",
+      "title": "Capacidad y cuellos de botella",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "Cuello de botella ahora",
+      "description": "El recurso más cerca de su límite en el último muestreo (sin contar temperatura ni el núcleo más cargado).",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "plexfair"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 6,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "plexfair"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT ts AS time, coalesce(bottleneck, '-') AS metric, bottleneck_pct AS value\nFROM poll WHERE ts = (SELECT max(ts) FROM poll)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 70
+              },
+              {
+                "color": "red",
+                "value": 85
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value_and_name",
+        "colorMode": "background",
+        "graphMode": "none"
+      }
+    },
+    {
+      "id": 14,
+      "type": "bargauge",
+      "title": "Ocupación ahora",
+      "description": "",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "plexfair"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 1,
+        "w": 9,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "plexfair"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT ts AS time, resource AS metric, pct AS value FROM resource_sample\nWHERE ts = (SELECT max(ts) FROM resource_sample) ORDER BY pct DESC"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 70
+              },
+              {
+                "color": "red",
+                "value": 85
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "valueMode": "color",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 15,
+      "type": "bargauge",
+      "title": "Ocupación p95 en el periodo",
+      "description": "El 95 % del tiempo la ocupación estuvo por debajo de este valor. Es mejor indicador que el pico para planificar.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "plexfair"
+      },
+      "gridPos": {
+        "x": 15,
+        "y": 1,
+        "w": 9,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "plexfair"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT max(ts) AS time, resource AS metric, percentile_cont(0.95) WITHIN GROUP (ORDER BY pct) AS value\nFROM resource_sample WHERE $__timeFilter(ts) GROUP BY resource ORDER BY 3 DESC"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 70
+              },
+              {
+                "color": "red",
+                "value": 85
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "valueMode": "color",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "Ocupación por recurso",
+      "description": "% de su capacidad. Amarillo a partir de 70 %, rojo a partir de 85 %.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "plexfair"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 9,
+        "w": 24,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "plexfair"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(ts, '1m'), resource AS metric, max(pct) AS value\nFROM resource_sample WHERE $__timeFilter(ts) GROUP BY 1, 2 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 70
+              },
+              {
+                "color": "red",
+                "value": 85
+              }
+            ]
+          },
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "spanNulls": 120000,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 17,
+      "type": "table",
+      "title": "Episodios de cuello de botella (ocupación >= umbral)",
+      "description": "Cada fila es un tramo seguido en el que un recurso estuvo por encima del umbral: qué recurso, cuánto duró, quién estaba viendo y qué más estaba cargado.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "plexfair"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 19,
+        "w": 24,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "plexfair"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH hot AS (\n  SELECT ts, bottleneck, bottleneck_pct, playing, transcodes,\n    CASE WHEN lag(ts) OVER (PARTITION BY bottleneck ORDER BY ts) >= ts - make_interval(secs => 2.5 * $poll) THEN 0 ELSE 1 END AS brk\n  FROM poll WHERE $__timeFilter(ts) AND bottleneck_pct >= $crit\n), g AS (\n  SELECT *, sum(brk) OVER (PARTITION BY bottleneck ORDER BY ts) AS grp FROM hot\n)\nSELECT min(g.ts) AS \"Inicio\",\n  round(extract(epoch FROM max(g.ts) - min(g.ts)) / 60 + $poll / 60.0, 1) AS \"Minutos\",\n  g.bottleneck AS \"Cuello de botella\",\n  round(max(g.bottleneck_pct)::numeric) AS \"Pico %\",\n  max(g.playing) AS \"Streams\", max(g.transcodes) AS \"Transcodes\",\n  (SELECT string_agg(DISTINCT s.user_name || ' (' || coalesce(s.video_decision, '?') || ')', ', ')\n     FROM session_sample s WHERE s.ts BETWEEN min(g.ts) AND max(g.ts) AND s.state = 'playing') AS \"Quién estaba viendo\",\n  (SELECT c.name || ' ' || round(avg(c.cpu_pct)::numeric) || '% CPU'\n     FROM container_sample c WHERE c.ts BETWEEN min(g.ts) AND max(g.ts)\n     GROUP BY c.name ORDER BY avg(c.cpu_pct) DESC LIMIT 1) AS \"Contenedor que más CPU usaba\",\n  (SELECT string_agg(r.resource || ' ' || round(r.pct::numeric) || '%', ', ' ORDER BY r.pct DESC)\n     FROM resource_sample r WHERE r.ts = max(g.ts) AND r.pct >= 50 AND r.resource <> g.bottleneck) AS \"Otros recursos >50%\"\nFROM g GROUP BY g.bottleneck, g.grp ORDER BY 1 DESC LIMIT 200"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 18,
+      "type": "table",
+      "title": "Margen: cuántos streams más caben",
+      "description": "Estimación: consumo medio con streams menos consumo en reposo, dividido entre streams (para la GPU, entre transcodes). 'Streams extra' = cuántos más caben antes de llegar al umbral partiendo del p95. El que tenga el número más bajo será el primer cuello de botella.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "plexfair"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 28,
+        "w": 14,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "plexfair"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH r AS (\n  SELECT rs.resource, rs.pct, rs.capacity, rs.unit,\n    CASE WHEN rs.resource LIKE 'GPU%' THEN p.transcodes ELSE p.playing END AS n\n  FROM resource_sample rs JOIN poll p ON p.ts = rs.ts\n  WHERE $__timeFilter(rs.ts) AND rs.resource <> 'GPU temperatura'\n), s AS (\n  SELECT resource, max(capacity) AS cap, max(unit) AS unit, max(pct) AS peak,\n    percentile_cont(0.95) WITHIN GROUP (ORDER BY pct) AS p95,\n    percentile_cont(0.5) WITHIN GROUP (ORDER BY pct) FILTER (WHERE n = 0) AS idle,\n    avg(pct) FILTER (WHERE n > 0) AS busy,\n    avg(n) FILTER (WHERE n > 0) AS avg_n\n  FROM r GROUP BY resource\n), k AS (\n  SELECT *, (busy - coalesce(idle, 0)) / nullif(avg_n, 0) AS per_stream FROM s\n)\nSELECT resource AS \"Recurso\",\n  trim_scale(round(cap::numeric, 1)) || ' ' || unit AS \"Capacidad\",\n  round(p95::numeric, 1) AS \"p95 %\",\n  round(peak::numeric, 1) AS \"Pico %\",\n  round(per_stream::numeric, 1) AS \"% por stream\",\n  CASE WHEN avg_n IS NULL THEN 'faltan datos con streams'\n       WHEN per_stream > 0.5 THEN greatest(floor(($crit - p95) / per_stream), 0)::int::text\n       ELSE 'sin límite a la vista' END AS \"Streams extra que caben\"\nFROM k ORDER BY p95 DESC"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 19,
+      "type": "table",
+      "title": "Especificaciones del sistema",
+      "description": "",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "plexfair"
+      },
+      "gridPos": {
+        "x": 14,
+        "y": 28,
+        "w": 10,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "plexfair"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT component AS \"Componente\", name AS \"Nombre\", detail AS \"Detalle\",\n  trim_scale(round(capacity::numeric, 2)) || ' ' || unit AS \"Capacidad\"\nFROM system_spec ORDER BY 1, 2"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "CPU por contenedor (% de toda la máquina)",
+      "description": "",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "plexfair"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 38,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "plexfair"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "WITH top AS (SELECT name FROM container_sample WHERE $__timeFilter(ts) GROUP BY name ORDER BY avg(cpu_pct) DESC LIMIT 8)\nSELECT $__timeGroupAlias(ts, '1m'), name AS metric, avg(cpu_pct) AS value FROM container_sample\nWHERE $__timeFilter(ts) AND name IN (SELECT name FROM top) GROUP BY 1, 2 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "spanNulls": 120000,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "RAM por contenedor",
+      "description": "",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "plexfair"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 38,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "plexfair"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "WITH top AS (SELECT name FROM container_sample WHERE $__timeFilter(ts) GROUP BY name ORDER BY avg(mem_mb) DESC LIMIT 8)\nSELECT $__timeGroupAlias(ts, '1m'), name AS metric, avg(mem_mb) * 1024 * 1024 AS value FROM container_sample\nWHERE $__timeFilter(ts) AND name IN (SELECT name FROM top) GROUP BY 1, 2 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "spanNulls": 120000,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 22,
+      "type": "row",
+      "title": "Justicia del reparto entre usuarios",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "x": 0,
+        "y": 47,
+        "w": 24,
+        "h": 1
+      }
+    },
     {
       "id": 1,
       "type": "timeseries",
@@ -45,7 +574,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 0,
+        "y": 48,
         "w": 24,
         "h": 8
       },
@@ -119,7 +648,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 8,
+        "y": 56,
         "w": 12,
         "h": 9
       },
@@ -174,7 +703,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 8,
+        "y": 56,
         "w": 12,
         "h": 9
       },
@@ -231,7 +760,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 17,
+        "y": 65,
         "w": 12,
         "h": 9
       },
@@ -300,7 +829,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 17,
+        "y": 65,
         "w": 12,
         "h": 9
       },
@@ -354,7 +883,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 26,
+        "y": 74,
         "w": 12,
         "h": 9
       },
@@ -409,7 +938,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 26,
+        "y": 74,
         "w": 12,
         "h": 9
       },
@@ -463,7 +992,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 35,
+        "y": 83,
         "w": 24,
         "h": 8
       },
@@ -497,7 +1026,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 43,
+        "y": 91,
         "w": 24,
         "h": 10
       },
@@ -531,7 +1060,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 53,
+        "y": 101,
         "w": 14,
         "h": 14
       },
@@ -593,7 +1122,7 @@
       },
       "gridPos": {
         "x": 14,
-        "y": 53,
+        "y": 101,
         "w": 10,
         "h": 14
       },

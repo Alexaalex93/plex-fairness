@@ -5,6 +5,8 @@ Every POLL_SECONDS I ask Tautulli what everyone is watching right now and save a
 bandwidth, source vs delivered quality, transcode speed, which array disk the file lives on...
 On top of that I grab GPU load (nvidia-smi) and per-disk read load (/proc/diskstats).
 With all that in Postgres, Grafana can show who gets what when several people watch at once.
+On top of that, system_stats.py measures how busy every resource is (CPU, RAM, network, GPU, disks...)
+and each poll stores which one is closest to its limit, so I can see what the bottleneck was.
 
 It also runs a tiny HTTP server so Tautulli can send a webhook on "Buffer Warning",
 that way buffering events end up in the same database.
@@ -21,6 +23,8 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import psycopg
 import requests
+
+import system_stats as ss
 
 # ---------- config (all from env vars) ----------
 TAUTULLI_URL = os.environ["TAUTULLI_URL"].rstrip("/")
@@ -99,6 +103,33 @@ CREATE TABLE IF NOT EXISTS buffer_event (
     title       text,
     session_key text,
     raw         jsonb
+);
+ALTER TABLE poll ADD COLUMN IF NOT EXISTS bottleneck text;
+ALTER TABLE poll ADD COLUMN IF NOT EXISTS bottleneck_pct real;
+CREATE TABLE IF NOT EXISTS resource_sample (
+    ts       timestamptz,
+    resource text,
+    used     real,
+    capacity real,
+    unit     text,
+    pct      real,
+    PRIMARY KEY (ts, resource)
+);
+CREATE TABLE IF NOT EXISTS container_sample (
+    ts      timestamptz,
+    name    text,
+    cpu_pct real,
+    mem_mb  real,
+    PRIMARY KEY (ts, name)
+);
+CREATE TABLE IF NOT EXISTS system_spec (
+    component  text,
+    name       text,
+    capacity   real,
+    unit       text,
+    detail     text,
+    updated_at timestamptz DEFAULT now(),
+    PRIMARY KEY (component, name)
 );
 """
 
@@ -241,22 +272,6 @@ class DiskStats:
         return out
 
 
-# ---------- GPU ----------
-def gpu_sample():
-    """nvidia-smi only works if the container runs with the nvidia runtime. If not, I just skip GPU."""
-    fields = "utilization.gpu,utilization.encoder,utilization.decoder,encoder.stats.sessionCount,memory.used"
-    try:
-        out = subprocess.run(
-            ["nvidia-smi", f"--query-gpu={fields}", "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=10, check=True,
-        ).stdout.strip().splitlines()[0]
-    except (OSError, subprocess.SubprocessError, IndexError):
-        return [None] * 5
-    vals = [to_float(x.strip()) for x in out.split(",")]
-    vals[3] = to_int(vals[3])
-    return vals
-
-
 # ---------- Tautulli ----------
 def get_activity():
     r = requests.get(
@@ -320,14 +335,53 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
 
 # ---------- main loop ----------
-def collect_once(conn, disks):
+class Probes:
+    """All the stateful samplers together (they need the previous reading to compute rates)."""
+
+    def __init__(self):
+        self.disks = DiskStats()
+        self.cpu = ss.CpuStats()
+        self.net = ss.NetStats()
+        self.containers = ss.ContainerStats()
+        self.disks.sample()       # first reads are just the baseline for the deltas
+        _safe_call(self.containers.sample)
+        log.info("Network: %s at %s Mbps | docker stats: %s", self.net.iface, self.net.speed, self.containers.enabled)
+
+
+def _safe_call(fn, *a, default=None):
+    try:
+        return fn(*a)
+    except Exception as e:
+        log.warning("%s failed: %s", getattr(fn, "__qualname__", fn), e)
+        return default
+
+
+def save_specs(conn, probes):
+    rows = ss.specs(probes.disks.names, probes.net)
+    with conn.cursor() as cur:
+        cur.executemany(
+            """INSERT INTO system_spec (component, name, capacity, unit, detail, updated_at)
+               VALUES (%s,%s,%s,%s,%s, now())
+               ON CONFLICT (component, name) DO UPDATE
+               SET capacity = EXCLUDED.capacity, unit = EXCLUDED.unit, detail = EXCLUDED.detail, updated_at = now()""",
+            rows,
+        )
+    log.info("Specs saved: %s", ", ".join(f"{r[0]} {r[2]} {r[3]}" for r in rows))
+
+
+def collect_once(conn, probes):
     ts = datetime.now(timezone.utc).replace(microsecond=0)
     act = get_activity()
     sessions = act.get("sessions", [])
     rows = [session_row(ts, s) for s in sessions]
     playing = [r for r in rows if r[7] == "playing"]
 
-    gpu = gpu_sample()
+    g = ss.gpu()
+    disk_rows = probes.disks.sample()
+    res = ss.resources(probes.cpu, probes.net, g, disk_rows, to_int(act.get("wan_bandwidth")))
+    bottleneck, bottleneck_pct = ss.bottleneck(res)
+    containers = _safe_call(probes.containers.sample, default=[]) or []
+
     poll = (
         ts,
         to_int(act.get("stream_count")),
@@ -338,28 +392,46 @@ def collect_once(conn, disks):
         to_int(act.get("lan_bandwidth")),
         jain([r[17] for r in playing]),   # bandwidth
         jain([r[18] for r in playing]),   # quality ratio
-        *gpu,
+        g.get("utilization.gpu"),
+        g.get("utilization.encoder"),
+        g.get("utilization.decoder"),
+        to_int(g.get("encoder.stats.sessionCount")),
+        g.get("memory.used"),
+        bottleneck,
+        bottleneck_pct,
     )
 
     with conn.transaction():
-        conn.execute("INSERT INTO poll VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING", poll)
-        if rows:
-            with conn.cursor() as cur:
+        conn.execute(
+            """INSERT INTO poll (ts, streams, playing, transcodes, total_bw_kbps, wan_bw_kbps, lan_bw_kbps,
+                                 jain_bandwidth, jain_quality, gpu_util, gpu_enc_util, gpu_dec_util,
+                                 gpu_enc_sessions, gpu_mem_mb, bottleneck, bottleneck_pct)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING""",
+            poll,
+        )
+        with conn.cursor() as cur:
+            if rows:
                 cur.executemany(
                     "INSERT INTO session_sample VALUES (" + ",".join(["%s"] * 24) + ") ON CONFLICT DO NOTHING",
                     rows,
                 )
-        disk_rows = [(ts, d, r, u) for d, r, u in disks.sample()]
-        if disk_rows:
-            with conn.cursor() as cur:
-                cur.executemany("INSERT INTO disk_sample VALUES (%s,%s,%s,%s) ON CONFLICT DO NOTHING", disk_rows)
+            if disk_rows:
+                cur.executemany("INSERT INTO disk_sample VALUES (%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+                                [(ts, d, r, u) for d, r, u in disk_rows])
+            if res:
+                cur.executemany("INSERT INTO resource_sample VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+                                [(ts, *r) for r in res])
+            if containers:
+                cur.executemany("INSERT INTO container_sample VALUES (%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+                                [(ts, *c) for c in containers])
 
-    if playing:
-        log.info("%d playing, %d transcoding, jain quality=%s", len(playing), poll[3], poll[8])
+    if playing or (bottleneck_pct or 0) >= 85:
+        log.info("%d playing, %d transcoding, jain quality=%s, busiest: %s %s%%",
+                 len(playing), poll[3], poll[8], bottleneck, bottleneck_pct)
 
 
 def cleanup(conn):
-    for table in ("poll", "session_sample", "disk_sample", "buffer_event"):
+    for table in ("poll", "session_sample", "disk_sample", "buffer_event", "resource_sample", "container_sample"):
         conn.execute(f"DELETE FROM {table} WHERE ts < now() - make_interval(days => %s)", (RETENTION_DAYS,))
 
 
@@ -369,10 +441,10 @@ def main():
     ).start()
     log.info("Webhook listening on :%d", WEBHOOK_PORT)
 
-    disks = DiskStats()
-    disks.sample()  # first read is just the baseline for the deltas
+    probes = Probes()
     conn = None
     last_cleanup = 0.0
+    last_specs = 0.0
 
     while True:
         started = time.monotonic()
@@ -381,7 +453,11 @@ def main():
                 conn = psycopg.connect(PG_DSN, autocommit=True)
                 conn.execute(SCHEMA)
                 log.info("Connected to Postgres")
-            collect_once(conn, disks)
+            # specs once a day; if it fails it shouldn't stop the stats collection
+            if not last_specs or started - last_specs > 86400:
+                _safe_call(save_specs, conn, probes)
+                last_specs = started
+            collect_once(conn, probes)
             if started - last_cleanup > 3600:
                 cleanup(conn)
                 last_cleanup = started
