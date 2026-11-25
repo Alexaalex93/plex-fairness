@@ -17,7 +17,7 @@ FROM poll WHERE $__timeFilter(ts) GROUP BY 1 ORDER BY 1""",
 FROM session_sample WHERE $__timeFilter(ts) AND state = 'playing'
 GROUP BY 1, 2 ORDER BY 1""",
 "speed_user": """SELECT $__timeGroupAlias(ts, '1m'), user_name AS metric, min(transcode_speed) AS value
-FROM session_sample WHERE $__timeFilter(ts) AND state = 'playing' AND transcode_speed IS NOT NULL
+FROM session_sample WHERE $__timeFilter(ts) AND state = 'playing' AND transcode_speed > 0 AND NOT coalesce(throttled, false)
 GROUP BY 1, 2 ORDER BY 1""",
 "gpu": """SELECT $__timeGroupAlias(ts, '1m'), avg(gpu_enc_util) AS "NVENC %", avg(gpu_dec_util) AS "NVDEC %",
   avg(gpu_util) AS "GPU %", max(transcodes) AS "Transcodes", max(playing) AS "Reproduciendo"
@@ -32,7 +32,7 @@ GROUP BY 1, 2 ORDER BY 1""",
   round(count(*) * $poll / 3600.0, 1) AS "Horas",
   round(100.0 * avg(CASE WHEN s.video_decision = 'transcode' THEN 1 ELSE 0 END), 1) AS "% transcode",
   round(avg(s.quality_ratio)::numeric, 2) AS "Calidad media",
-  round(100.0 * avg(CASE WHEN s.transcode_speed < 1 THEN 1 ELSE 0 END), 1) AS "% transcode lento",
+  round(100.0 * avg(CASE WHEN s.transcode_speed > 0 AND s.transcode_speed < 1 AND NOT coalesce(s.throttled, false) THEN 1 ELSE 0 END), 1) AS "% transcode lento",
   round(avg(s.bandwidth_kbps) / 1000.0, 1) AS "Mbps medio",
   (SELECT count(*) FROM buffer_event b WHERE b.user_name = s.user_name AND $__timeFilter(b.ts)) AS "Buffers"
 FROM session_sample s WHERE $__timeFilter(s.ts) AND s.state = 'playing'
@@ -48,7 +48,9 @@ GROUP BY h ORDER BY h""",
 "unfair": """SELECT p.ts AS "Momento", p.playing AS "Reproduciendo", round(100 * p.jain_quality)::int AS "Equidad %",
   round(p.gpu_enc_util::numeric) AS "NVENC %",
   string_agg(s.user_name || ' ' || round(100 * coalesce(s.quality_ratio, 0))::text || '% '
-             || coalesce(s.video_decision, '') || coalesce(' x' || s.transcode_speed::text, ''), ' | ' ORDER BY s.quality_ratio) AS "Detalle"
+             || coalesce(s.video_decision, '')
+             || CASE WHEN s.transcode_speed > 0 AND NOT coalesce(s.throttled, false) THEN ' x' || s.transcode_speed::text
+                     WHEN s.video_decision = 'transcode' THEN ' (en pausa, va adelantado)' ELSE '' END, ' | ' ORDER BY s.quality_ratio) AS "Detalle"
 FROM poll p JOIN session_sample s ON s.ts = p.ts AND s.state = 'playing'
 WHERE $__timeFilter(p.ts) AND p.jain_quality < $jain_threshold
 GROUP BY p.ts, p.playing, p.jain_quality, p.gpu_enc_util ORDER BY p.ts DESC LIMIT 300""",
@@ -58,7 +60,8 @@ WHERE $__timeFilter(ts) ORDER BY ts DESC LIMIT 200""",
 
 # ---------- capacity & bottlenecks ----------
 Q.update({
-"now_bottleneck": """SELECT ts AS time, coalesce(bottleneck, '-') AS metric, bottleneck_pct AS value
+"now_bottleneck": """SELECT ts AS time,
+  CASE WHEN bottleneck_pct >= 50 THEN bottleneck ELSE 'Nada cerca del límite' END AS metric, bottleneck_pct AS value
 FROM poll WHERE ts = (SELECT max(ts) FROM poll)""",
 "gauge_now": """SELECT ts AS time, resource AS metric, pct AS value FROM resource_sample
 WHERE ts = (SELECT max(ts) FROM resource_sample) ORDER BY pct DESC""",
@@ -82,7 +85,7 @@ SELECT min(g.ts) AS "Inicio",
      FROM session_sample s WHERE s.ts BETWEEN min(g.ts) AND max(g.ts) AND s.state = 'playing') AS "Quién estaba viendo",
   (SELECT c.name || ' ' || round(avg(c.cpu_pct)::numeric) || '% CPU'
      FROM container_sample c WHERE c.ts BETWEEN min(g.ts) AND max(g.ts)
-     GROUP BY c.name ORDER BY avg(c.cpu_pct) DESC LIMIT 1) AS "Contenedor que más CPU usaba",
+     GROUP BY c.name HAVING avg(c.cpu_pct) >= 1 ORDER BY avg(c.cpu_pct) DESC LIMIT 1) AS "Contenedor que más CPU usaba",
   (SELECT string_agg(r.resource || ' ' || round(r.pct::numeric) || '%', ', ' ORDER BY r.pct DESC)
      FROM resource_sample r WHERE r.ts = max(g.ts) AND r.pct >= 50 AND r.resource <> g.bottleneck) AS "Otros recursos >50%"
 FROM g GROUP BY g.bottleneck, g.grp ORDER BY 1 DESC LIMIT 200""",
@@ -152,7 +155,7 @@ panels = [
         desc="100 % = le llega la calidad original (direct play). Si transcodifica, la proporción de bitrate que le llega.",
         field_extra={"min": 0, "max": 1}),
   panel("Velocidad de transcode (<1 = cortes)", "speed_user", "timeseries", 0, 17, 12, 9, unit="x",
-        desc="Mínimo por minuto. Por debajo de 1x Plex no llega a tiempo y el cliente se queda cargando.",
+        desc="Mínimo por minuto. Por debajo de 1x Plex no llega a tiempo y el cliente se queda cargando. No incluye los momentos en que Plex pausa el transcode porque ya va adelantado.",
         field_extra={"min": 0, **thresholds((None, "red"), (1, "green"))}),
   panel("GPU (RTX 2060) vs transcodes", "gpu", "timeseries", 12, 17, 12, 9,
         desc="Uso del codificador (NVENC) y decodificador (NVDEC) de la GPU junto al número de transcodes."),
@@ -183,7 +186,7 @@ def row(title, y):
 capacity = [
   row("Capacidad y cuellos de botella", 0),
   panel("Cuello de botella ahora", "now_bottleneck", "stat", 0, 1, 6, 8,
-        desc="El recurso más cerca de su límite en el último muestreo (sin contar temperatura ni el núcleo más cargado).",
+        desc="El recurso más cerca de su límite en el último muestreo (sin contar temperatura ni el núcleo más cargado). Si ninguno pasa del 50 % muestra 'Nada cerca del límite'.",
         extra={"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": False},
                "textMode": "value_and_name", "colorMode": "background", "graphMode": "none"},
         field_extra=PCT),

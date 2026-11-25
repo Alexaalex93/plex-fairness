@@ -62,7 +62,7 @@
       "id": 13,
       "type": "stat",
       "title": "Cuello de botella ahora",
-      "description": "El recurso más cerca de su límite en el último muestreo (sin contar temperatura ni el núcleo más cargado).",
+      "description": "El recurso más cerca de su límite en el último muestreo (sin contar temperatura ni el núcleo más cargado). Si ninguno pasa del 50 % muestra 'Nada cerca del límite'.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "plexfair"
@@ -83,7 +83,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT ts AS time, coalesce(bottleneck, '-') AS metric, bottleneck_pct AS value\nFROM poll WHERE ts = (SELECT max(ts) FROM poll)"
+          "rawSql": "SELECT ts AS time,\n  CASE WHEN bottleneck_pct >= 50 THEN bottleneck ELSE 'Nada cerca del límite' END AS metric, bottleneck_pct AS value\nFROM poll WHERE ts = (SELECT max(ts) FROM poll)"
         }
       ],
       "fieldConfig": {
@@ -357,7 +357,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "WITH hot AS (\n  SELECT ts, bottleneck, bottleneck_pct, playing, transcodes,\n    CASE WHEN lag(ts) OVER (PARTITION BY bottleneck ORDER BY ts) >= ts - make_interval(secs => 2.5 * $poll) THEN 0 ELSE 1 END AS brk\n  FROM poll WHERE $__timeFilter(ts) AND bottleneck_pct >= $crit\n), g AS (\n  SELECT *, sum(brk) OVER (PARTITION BY bottleneck ORDER BY ts) AS grp FROM hot\n)\nSELECT min(g.ts) AS \"Inicio\",\n  round(extract(epoch FROM max(g.ts) - min(g.ts)) / 60 + $poll / 60.0, 1) AS \"Minutos\",\n  g.bottleneck AS \"Cuello de botella\",\n  round(max(g.bottleneck_pct)::numeric) AS \"Pico %\",\n  max(g.playing) AS \"Streams\", max(g.transcodes) AS \"Transcodes\",\n  (SELECT string_agg(DISTINCT s.user_name || ' (' || coalesce(s.video_decision, '?') || ')', ', ')\n     FROM session_sample s WHERE s.ts BETWEEN min(g.ts) AND max(g.ts) AND s.state = 'playing') AS \"Quién estaba viendo\",\n  (SELECT c.name || ' ' || round(avg(c.cpu_pct)::numeric) || '% CPU'\n     FROM container_sample c WHERE c.ts BETWEEN min(g.ts) AND max(g.ts)\n     GROUP BY c.name ORDER BY avg(c.cpu_pct) DESC LIMIT 1) AS \"Contenedor que más CPU usaba\",\n  (SELECT string_agg(r.resource || ' ' || round(r.pct::numeric) || '%', ', ' ORDER BY r.pct DESC)\n     FROM resource_sample r WHERE r.ts = max(g.ts) AND r.pct >= 50 AND r.resource <> g.bottleneck) AS \"Otros recursos >50%\"\nFROM g GROUP BY g.bottleneck, g.grp ORDER BY 1 DESC LIMIT 200"
+          "rawSql": "WITH hot AS (\n  SELECT ts, bottleneck, bottleneck_pct, playing, transcodes,\n    CASE WHEN lag(ts) OVER (PARTITION BY bottleneck ORDER BY ts) >= ts - make_interval(secs => 2.5 * $poll) THEN 0 ELSE 1 END AS brk\n  FROM poll WHERE $__timeFilter(ts) AND bottleneck_pct >= $crit\n), g AS (\n  SELECT *, sum(brk) OVER (PARTITION BY bottleneck ORDER BY ts) AS grp FROM hot\n)\nSELECT min(g.ts) AS \"Inicio\",\n  round(extract(epoch FROM max(g.ts) - min(g.ts)) / 60 + $poll / 60.0, 1) AS \"Minutos\",\n  g.bottleneck AS \"Cuello de botella\",\n  round(max(g.bottleneck_pct)::numeric) AS \"Pico %\",\n  max(g.playing) AS \"Streams\", max(g.transcodes) AS \"Transcodes\",\n  (SELECT string_agg(DISTINCT s.user_name || ' (' || coalesce(s.video_decision, '?') || ')', ', ')\n     FROM session_sample s WHERE s.ts BETWEEN min(g.ts) AND max(g.ts) AND s.state = 'playing') AS \"Quién estaba viendo\",\n  (SELECT c.name || ' ' || round(avg(c.cpu_pct)::numeric) || '% CPU'\n     FROM container_sample c WHERE c.ts BETWEEN min(g.ts) AND max(g.ts)\n     GROUP BY c.name HAVING avg(c.cpu_pct) >= 1 ORDER BY avg(c.cpu_pct) DESC LIMIT 1) AS \"Contenedor que más CPU usaba\",\n  (SELECT string_agg(r.resource || ' ' || round(r.pct::numeric) || '%', ', ' ORDER BY r.pct DESC)\n     FROM resource_sample r WHERE r.ts = max(g.ts) AND r.pct >= 50 AND r.resource <> g.bottleneck) AS \"Otros recursos >50%\"\nFROM g GROUP BY g.bottleneck, g.grp ORDER BY 1 DESC LIMIT 200"
         }
       ],
       "fieldConfig": {
@@ -753,7 +753,7 @@
       "id": 4,
       "type": "timeseries",
       "title": "Velocidad de transcode (<1 = cortes)",
-      "description": "Mínimo por minuto. Por debajo de 1x Plex no llega a tiempo y el cliente se queda cargando.",
+      "description": "Mínimo por minuto. Por debajo de 1x Plex no llega a tiempo y el cliente se queda cargando. No incluye los momentos en que Plex pausa el transcode porque ya va adelantado.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "plexfair"
@@ -774,7 +774,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroupAlias(ts, '1m'), user_name AS metric, min(transcode_speed) AS value\nFROM session_sample WHERE $__timeFilter(ts) AND state = 'playing' AND transcode_speed IS NOT NULL\nGROUP BY 1, 2 ORDER BY 1"
+          "rawSql": "SELECT $__timeGroupAlias(ts, '1m'), user_name AS metric, min(transcode_speed) AS value\nFROM session_sample WHERE $__timeFilter(ts) AND state = 'playing' AND transcode_speed > 0 AND NOT coalesce(throttled, false)\nGROUP BY 1, 2 ORDER BY 1"
         }
       ],
       "fieldConfig": {
@@ -1006,7 +1006,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT s.user_name AS \"Usuario\",\n  round(count(*) * $poll / 3600.0, 1) AS \"Horas\",\n  round(100.0 * avg(CASE WHEN s.video_decision = 'transcode' THEN 1 ELSE 0 END), 1) AS \"% transcode\",\n  round(avg(s.quality_ratio)::numeric, 2) AS \"Calidad media\",\n  round(100.0 * avg(CASE WHEN s.transcode_speed < 1 THEN 1 ELSE 0 END), 1) AS \"% transcode lento\",\n  round(avg(s.bandwidth_kbps) / 1000.0, 1) AS \"Mbps medio\",\n  (SELECT count(*) FROM buffer_event b WHERE b.user_name = s.user_name AND $__timeFilter(b.ts)) AS \"Buffers\"\nFROM session_sample s WHERE $__timeFilter(s.ts) AND s.state = 'playing'\nGROUP BY s.user_name ORDER BY 2 DESC"
+          "rawSql": "SELECT s.user_name AS \"Usuario\",\n  round(count(*) * $poll / 3600.0, 1) AS \"Horas\",\n  round(100.0 * avg(CASE WHEN s.video_decision = 'transcode' THEN 1 ELSE 0 END), 1) AS \"% transcode\",\n  round(avg(s.quality_ratio)::numeric, 2) AS \"Calidad media\",\n  round(100.0 * avg(CASE WHEN s.transcode_speed > 0 AND s.transcode_speed < 1 AND NOT coalesce(s.throttled, false) THEN 1 ELSE 0 END), 1) AS \"% transcode lento\",\n  round(avg(s.bandwidth_kbps) / 1000.0, 1) AS \"Mbps medio\",\n  (SELECT count(*) FROM buffer_event b WHERE b.user_name = s.user_name AND $__timeFilter(b.ts)) AS \"Buffers\"\nFROM session_sample s WHERE $__timeFilter(s.ts) AND s.state = 'playing'\nGROUP BY s.user_name ORDER BY 2 DESC"
         }
       ],
       "fieldConfig": {
@@ -1040,7 +1040,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT p.ts AS \"Momento\", p.playing AS \"Reproduciendo\", round(100 * p.jain_quality)::int AS \"Equidad %\",\n  round(p.gpu_enc_util::numeric) AS \"NVENC %\",\n  string_agg(s.user_name || ' ' || round(100 * coalesce(s.quality_ratio, 0))::text || '% '\n             || coalesce(s.video_decision, '') || coalesce(' x' || s.transcode_speed::text, ''), ' | ' ORDER BY s.quality_ratio) AS \"Detalle\"\nFROM poll p JOIN session_sample s ON s.ts = p.ts AND s.state = 'playing'\nWHERE $__timeFilter(p.ts) AND p.jain_quality < $jain_threshold\nGROUP BY p.ts, p.playing, p.jain_quality, p.gpu_enc_util ORDER BY p.ts DESC LIMIT 300"
+          "rawSql": "SELECT p.ts AS \"Momento\", p.playing AS \"Reproduciendo\", round(100 * p.jain_quality)::int AS \"Equidad %\",\n  round(p.gpu_enc_util::numeric) AS \"NVENC %\",\n  string_agg(s.user_name || ' ' || round(100 * coalesce(s.quality_ratio, 0))::text || '% '\n             || coalesce(s.video_decision, '')\n             || CASE WHEN s.transcode_speed > 0 AND NOT coalesce(s.throttled, false) THEN ' x' || s.transcode_speed::text\n                     WHEN s.video_decision = 'transcode' THEN ' (en pausa, va adelantado)' ELSE '' END, ' | ' ORDER BY s.quality_ratio) AS \"Detalle\"\nFROM poll p JOIN session_sample s ON s.ts = p.ts AND s.state = 'playing'\nWHERE $__timeFilter(p.ts) AND p.jain_quality < $jain_threshold\nGROUP BY p.ts, p.playing, p.jain_quality, p.gpu_enc_util ORDER BY p.ts DESC LIMIT 300"
         }
       ],
       "fieldConfig": {
