@@ -6,7 +6,9 @@ Además de lo de cada stream, mide:
 - **El cuello de botella de cada momento** y los episodios en que algún recurso pasa del umbral.
 - **Estimación de cuántos streams más caben** antes de llegar al límite.
 
-Las gráficas se ven en Grafana, en `http://IP_NAS:6002`: es el contenedor `plex-fairness-grafana`, que ya trae la conexión y el dashboard.
+Las gráficas se ven en Grafana, en `http://IP_NAS:6002`: es el contenedor `plex-fairness-grafana`, que ya trae la conexión y dos dashboards. Arriba hay botones para pasar de uno a otro:
+- **Plex - Resumen**: es la página de inicio. Muestra el uso, la ocupación de cada recurso con su estado y la causa de los picos, y cuántos streams más caben.
+- **Plex - Detalle**: todas las gráficas.
 
 Muestrea Tautulli cada 30 s y guarda en Postgres:
 - **Por stream**: ancho de banda, calidad original frente a servida, decisión de transcode, velocidad del transcode y disco donde está el fichero.
@@ -42,4 +44,4 @@ Los umbrales del aviso se ajustan en Settings → Notifications (Buffer Warning 
 - **Varios streams en el mismo disco y ese disco cerca del 100 %**: el límite es el disco.
 
 ## Regenerar el dashboard
-Las consultas y los paneles están en `tools/build_dashboard.py`. Para regenerar los dos JSON, ejecuta desde la raíz del repo `python3 tools/build_dashboard.py`.
+Las consultas y los paneles están en `tools/build_dashboard.py`. Para regenerar los JSON (detalle y resumen), ejecuta desde la raíz del repo `python3 tools/build_dashboard.py`.

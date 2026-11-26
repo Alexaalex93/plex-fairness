@@ -8,9 +8,23 @@
       "pluginName": "PostgreSQL"
     }
   ],
-  "title": "Plex - Rendimiento y calidad",
+  "title": "Plex - Detalle",
   "uid": "plex-fairness",
   "timezone": "Europe/Madrid",
+  "links": [
+    {
+      "type": "dashboards",
+      "tags": [
+        "plex"
+      ],
+      "asDropdown": false,
+      "includeVars": false,
+      "keepTime": false,
+      "targetBlank": false,
+      "title": "Dashboards",
+      "icon": "external link"
+    }
+  ],
   "time": {
     "from": "now-24h",
     "to": "now"

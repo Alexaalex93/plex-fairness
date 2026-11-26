@@ -124,6 +124,102 @@ SELECT $__timeGroupAlias(ts, '1m'), name AS metric, avg(mem_mb) * 1024 * 1024 AS
 WHERE $__timeFilter(ts) AND name IN (SELECT name FROM top) GROUP BY 1, 2 ORDER BY 1""",
 })
 
+# ---------- summary dashboard ("Plex - Resumen") ----------
+# Same headroom logic as the detail dashboard, but split by stream type:
+# GPU resources are consumed by transcodes, everything else by any stream (direct play).
+HEADROOM_CTE = """WITH r AS (
+  SELECT rs.resource, rs.pct, rs.used, rs.capacity, rs.unit,
+    CASE WHEN rs.resource LIKE 'GPU%' OR rs.resource LIKE 'RAM transcode%' THEN p.transcodes ELSE p.playing END AS n
+  FROM resource_sample rs JOIN poll p ON p.ts = rs.ts
+  WHERE $__timeFilter(rs.ts) AND rs.resource NOT IN ('GPU temperatura', 'CPU núcleo más cargado', 'GPU')
+), s AS (
+  SELECT resource, max(capacity) AS cap, max(unit) AS unit, max(used) AS max_used,
+    percentile_cont(0.95) WITHIN GROUP (ORDER BY pct) AS p95,
+    percentile_cont(0.5) WITHIN GROUP (ORDER BY pct) FILTER (WHERE n = 0) AS idle,
+    avg(pct) FILTER (WHERE n > 0) AS busy,
+    avg(n) FILTER (WHERE n > 0) AS avg_n
+  FROM r GROUP BY resource
+), k AS (
+  SELECT *,
+    CASE WHEN resource LIKE 'GPU%' OR resource LIKE 'RAM transcode%' THEN 'Transcode' ELSE 'Direct play' END AS kind,
+    (busy - coalesce(idle, 0)) / nullif(avg_n, 0) AS per_stream
+  FROM s
+), e AS (
+  SELECT *,
+    CASE
+      -- the NVIDIA consumer driver caps simultaneous encodes, that's a hard limit, not a %
+      WHEN resource = 'GPU sesiones NVENC' THEN greatest(cap - max_used, 0)::int
+      -- RAM goes up and down mostly because of other containers (torrents...), so the per-stream
+      -- estimate is just noise. Plex uses very little RAM per direct play, I don't count it as a limit.
+      WHEN resource = 'RAM' THEN NULL
+      WHEN avg_n IS NULL THEN NULL
+      WHEN per_stream > 0.5 THEN greatest(floor(($crit - p95) / per_stream), 0)::int
+      ELSE NULL END AS extra
+  FROM k
+)"""
+
+Q.update({
+"sum_now": """SELECT ts AS time, playing AS "Viendo ahora" FROM poll ORDER BY ts DESC LIMIT 1""",
+"sum_peak": """SELECT ts AS time, 'el ' || to_char(ts AT TIME ZONE 'Europe/Madrid', 'DD/MM HH24:MI') AS metric, playing AS value
+FROM poll WHERE $__timeFilter(ts) ORDER BY playing DESC, ts DESC LIMIT 1""",
+"sum_avg": """SELECT round(avg(playing) FILTER (WHERE playing > 0), 1) AS "Media con uso" FROM poll WHERE $__timeFilter(ts)""",
+"sum_hours": """SELECT round(count(*) * $poll / 3600.0) AS "Horas vistas" FROM session_sample WHERE $__timeFilter(ts) AND state = 'playing'""",
+"sum_users": """SELECT count(DISTINCT user_name) AS "Usuarios activos" FROM session_sample WHERE $__timeFilter(ts) AND state = 'playing'""",
+"sum_peak_trans": """SELECT ts AS time, CASE WHEN transcodes > 0 THEN 'el ' || to_char(ts AT TIME ZONE 'Europe/Madrid', 'DD/MM HH24:MI') ELSE 'ninguno' END AS metric, transcodes AS value
+FROM poll WHERE $__timeFilter(ts) ORDER BY transcodes DESC, ts DESC LIMIT 1""",
+"sum_resources": """WITH r AS (
+  SELECT rs.resource, rs.ts, rs.pct, rs.used, rs.capacity, rs.unit, p.playing, p.transcodes
+  FROM resource_sample rs JOIN poll p ON p.ts = rs.ts
+  WHERE $__timeFilter(rs.ts) AND rs.resource NOT IN ('CPU núcleo más cargado', 'GPU')
+), s AS (
+  SELECT resource, max(capacity) AS cap, max(unit) AS unit,
+    percentile_cont(0.95) WITHIN GROUP (ORDER BY pct) AS p95,
+    percentile_cont(0.95) WITHIN GROUP (ORDER BY used) AS p95_used,
+    max(pct) AS peak, max(used) AS peak_used
+  FROM r GROUP BY resource
+), pk AS (
+  -- the moment of the peak, to explain what caused it
+  SELECT DISTINCT ON (resource) resource, ts, playing, transcodes FROM r ORDER BY resource, pct DESC, ts DESC
+)
+SELECT s.resource AS "Recurso",
+  trim_scale(round(s.cap::numeric, 1)) || ' ' || s.unit AS "Capacidad",
+  CASE WHEN s.unit = '°C' THEN round(s.p95_used::numeric) || ' °C' ELSE round(s.p95::numeric, 1) || ' %' END AS "p95",
+  CASE WHEN s.unit = '°C' THEN round(s.peak_used::numeric) || ' °C' ELSE round(s.peak::numeric, 1) || ' %' END AS "Pico",
+  pk.ts AS "Cuándo",
+  CASE WHEN pk.playing > 0
+       THEN 'con ' || pk.playing || ' stream' || CASE WHEN pk.playing > 1 THEN 's' ELSE '' END
+            || CASE WHEN pk.transcodes > 0 THEN ' (' || pk.transcodes || ' transcode)' ELSE '' END
+       ELSE 'tarea de fondo' END
+  || coalesce(' · ' || (SELECT c.name FROM container_sample c
+                         WHERE c.ts BETWEEN pk.ts - interval '1 minute' AND pk.ts + interval '1 minute'
+                         GROUP BY c.name HAVING avg(c.cpu_pct) >= 1 ORDER BY avg(c.cpu_pct) DESC LIMIT 1), '') AS "Causa del pico",
+  CASE WHEN s.p95 >= 85 THEN 'Al límite' WHEN s.p95 >= 70 THEN 'Vigilar' WHEN s.p95 >= 50 THEN 'Holgado' ELSE 'Sobrado' END AS "Estado"
+FROM s JOIN pk USING (resource)
+ORDER BY CASE
+  WHEN s.resource = 'CPU' THEN 1 WHEN s.resource = 'RAM' THEN 2 WHEN s.resource LIKE 'RAM transcode%' THEN 3
+  WHEN s.resource LIKE 'GPU%' THEN 4 WHEN s.resource LIKE 'Red%' THEN 5 WHEN s.resource LIKE 'Internet%' THEN 6 ELSE 7 END,
+  s.resource""",
+"sum_extra_dp": HEADROOM_CTE + """
+SELECT now() AS time, 'límite: ' || resource AS metric, extra AS value FROM e
+WHERE kind = 'Direct play' AND extra IS NOT NULL ORDER BY extra LIMIT 1""",
+"sum_extra_tc": HEADROOM_CTE + """
+SELECT now() AS time, 'límite: ' || resource AS metric, extra AS value FROM e
+WHERE kind = 'Transcode' AND extra IS NOT NULL ORDER BY extra LIMIT 1""",
+"sum_headroom": HEADROOM_CTE + """
+SELECT kind AS "Tipo de stream", resource AS "Recurso",
+  CASE WHEN resource = 'GPU sesiones NVENC' THEN '1 sesión'
+       WHEN per_stream IS NULL THEN '—' ELSE round(per_stream::numeric, 1) || ' %' END AS "Consumo por stream",
+  CASE WHEN resource = 'GPU sesiones NVENC' THEN round(max_used) || ' de ' || round(cap) || ' en uso (pico)'
+       ELSE round(p95::numeric, 1) || ' %' END AS "Uso p95",
+  coalesce(extra::text, CASE WHEN avg_n IS NULL THEN 'faltan datos' ELSE 'sin límite a la vista' END) AS "Streams extra que caben",
+  CASE WHEN resource = 'GPU sesiones NVENC' THEN 'Límite fijo del driver NVIDIA: transcodes a la vez'
+       WHEN resource LIKE 'Disco%' THEN 'Por disco. Llega antes si varios 4K pesados leen del mismo disco'
+       WHEN resource LIKE 'Internet%' THEN 'Tu subida; la bajada de cada usuario puede limitar antes'
+       WHEN resource = 'RAM' THEN 'No se estima: la RAM la mueven sobre todo otros contenedores. Plex gasta muy poca por stream; vigila el p95'
+       ELSE '' END AS "Nota"
+FROM e ORDER BY kind, extra NULLS LAST, resource""",
+})
+
 if len(sys.argv) > 1 and sys.argv[1] == "sql":
     print(json.dumps(Q)); sys.exit()
 
@@ -222,7 +318,8 @@ panels = capacity + panels
 dash = {
   "__inputs": [{"name": "DS_PLEXFAIR", "label": "plexfair (PostgreSQL)", "type": "datasource",
                 "pluginId": "grafana-postgresql-datasource", "pluginName": "PostgreSQL"}],
-  "title": "Plex - Rendimiento y calidad", "uid": "plex-fairness", "timezone": TZ,
+  "title": "Plex - Detalle", "uid": "plex-fairness", "timezone": TZ, "links": [{"type": "dashboards", "tags": ["plex"], "asDropdown": False, "includeVars": False,
+             "keepTime": False, "targetBlank": False, "title": "Dashboards", "icon": "external link"}],
   "time": {"from": "now-24h", "to": "now"}, "refresh": "1m", "schemaVersion": 39, "tags": ["plex"],
   "templating": {"list": [
     {"name": "poll", "type": "constant", "query": "30", "hide": 2, "label": "Segundos entre muestreos"},
@@ -239,4 +336,74 @@ json.dump(dash, open("grafana_dashboard.json", "w"), ensure_ascii=False, indent=
 prov = json.loads(json.dumps(dash).replace("${DS_PLEXFAIR}", "plexfair"))
 prov.pop("__inputs")
 json.dump(prov, open("grafana/dashboards/plex-fairness.json", "w"), ensure_ascii=False, indent=2)
-print("dashboards ok,", len(panels), "panels")
+
+# ================= summary dashboard =================
+_id = 0
+STATE_COLORS = {"custom": {"cellOptions": {"type": "color-background", "mode": "basic"}, "align": "center"},
+                "mappings": [{"type": "value", "options": {
+                    "Sobrado": {"color": "green", "index": 0}, "Holgado": {"color": "blue", "index": 1},
+                    "Vigilar": {"color": "yellow", "index": 2}, "Al límite": {"color": "red", "index": 3}}}]}
+
+def stat(title, key, x, y, w, h, desc="", fmt="table", name=False, color="blue"):
+    return panel(title, key, "stat", x, y, w, h, fmt=fmt, desc=desc,
+                 extra={"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": False},
+                        "textMode": "value_and_name" if name else "value", "colorMode": "background", "graphMode": "none",
+                        "justifyMode": "center"},
+                 field_extra={"color": {"mode": "fixed", "fixedColor": color}, "decimals": 1 if key == "sum_avg" else 0})
+
+s_panels = [
+  row("Uso de Plex", 0),
+  stat("Viendo ahora", "sum_now", 0, 1, 4, 5, color="green"),
+  stat("Pico de simultáneos", "sum_peak", 4, 1, 4, 5, fmt="time_series", name=True, color="purple",
+       desc="Máximo de personas reproduciendo a la vez en el periodo, y cuándo fue."),
+  stat("Media cuando hay uso", "sum_avg", 8, 1, 4, 5, desc="Personas viendo a la vez de media, contando solo los momentos en que alguien ve algo."),
+  stat("Horas vistas", "sum_hours", 12, 1, 4, 5),
+  stat("Usuarios activos", "sum_users", 16, 1, 4, 5),
+  stat("Pico de transcodes", "sum_peak_trans", 20, 1, 4, 5, fmt="time_series", name=True, color="orange",
+       desc="Máximo de transcodes a la vez. Son los únicos streams que usan la GPU."),
+
+  row("Ocupación de los recursos", 6),
+  panel("Ocupación de los recursos", "sum_resources", "table", 0, 7, 24, 12, fmt="table",
+        desc="p95: el 95 % del tiempo estuvo por debajo de este valor. Estado según el p95: Sobrado <50 %, Holgado 50-70 %, Vigilar 70-85 %, Al límite >=85 %. 'Causa del pico' dice si el pico fue con gente viendo o por una tarea de fondo, y qué contenedor usaba CPU en ese momento.",
+        field_extra={"custom": {"align": "auto"}}),
+
+  row("Margen: cuántos streams más caben", 19),
+  stat("Streams direct play extra", "sum_extra_dp", 0, 20, 8, 6, fmt="time_series", name=True, color="green",
+       desc="Cuántas personas más podrían ver algo en direct play a la vez antes de que algún recurso llegue al umbral. Debajo, el recurso que llegaría primero."),
+  stat("Transcodes extra", "sum_extra_tc", 8, 20, 8, 6, fmt="time_series", name=True, color="orange",
+       desc="Cuántos transcodes más a la vez caben antes del límite de la GPU (codificador o las 8 sesiones del driver)."),
+  {"id": 999, "type": "text", "title": "Cómo leerlo", "gridPos": {"x": 16, "y": 20, "w": 8, "h": 6},
+   "options": {"mode": "markdown", "content":
+     "- **Direct play** no usa la GPU: lo limitan CPU, RAM, discos y red.\n"
+     "- **Transcode** usa la GPU y la RAM de transcode: el límite duro son las **8 sesiones** del driver de NVIDIA.\n"
+     "- La estimación mejora con más días de datos y con momentos de varios streams a la vez.\n"
+     "- **Discos**: en la práctica el límite llega antes si 5-6 personas ven 4K pesado **del mismo disco**."}},
+  panel("Margen por recurso", "sum_headroom", "table", 0, 26, 24, 11, fmt="table",
+        desc="Consumo por stream = uso medio con gente viendo menos uso en reposo, dividido entre streams. Streams extra = cuántos más caben partiendo del p95 hasta el umbral."),
+]
+# colour the Estado column
+for p in s_panels:
+    if p.get("targets") and p["targets"][0]["rawSql"] == Q["sum_resources"]:
+        p["fieldConfig"]["overrides"] = [
+            {"matcher": {"id": "byName", "options": "Estado"},
+             "properties": [{"id": "custom.cellOptions", "value": {"type": "color-background", "mode": "basic"}},
+                            {"id": "mappings", "value": STATE_COLORS["mappings"]}]},
+            {"matcher": {"id": "byName", "options": "Cuándo"},
+             "properties": [{"id": "unit", "value": "dateTimeAsLocal"}]}]
+
+summary = {
+  "__inputs": dash["__inputs"],
+  "title": "Plex - Resumen", "uid": "plex-summary", "timezone": TZ, "links": dash["links"],
+  "time": {"from": "now-90d", "to": "now"}, "refresh": "5m", "schemaVersion": 39, "tags": ["plex"],
+  "templating": {"list": [
+    {"name": "poll", "type": "constant", "query": "30", "hide": 2},
+    {"name": "crit", "type": "custom", "query": "70,80,85,90,95", "label": "Umbral %",
+     "current": {"text": "85", "value": "85"}, "options": []},
+  ]},
+  "panels": s_panels,
+}
+json.dump(summary, open("grafana_dashboard_summary.json", "w"), ensure_ascii=False, indent=2)
+sprov = json.loads(json.dumps(summary).replace("${DS_PLEXFAIR}", "plexfair"))
+sprov.pop("__inputs")
+json.dump(sprov, open("grafana/dashboards/plex-summary.json", "w"), ensure_ascii=False, indent=2)
+print("dashboards ok:", len(panels), "detail panels,", len(s_panels), "summary panels")

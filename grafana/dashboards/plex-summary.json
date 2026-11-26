@@ -1,0 +1,647 @@
+{
+  "title": "Plex - Resumen",
+  "uid": "plex-summary",
+  "timezone": "Europe/Madrid",
+  "links": [
+    {
+      "type": "dashboards",
+      "tags": [
+        "plex"
+      ],
+      "asDropdown": false,
+      "includeVars": false,
+      "keepTime": false,
+      "targetBlank": false,
+      "title": "Dashboards",
+      "icon": "external link"
+    }
+  ],
+  "time": {
+    "from": "now-90d",
+    "to": "now"
+  },
+  "refresh": "5m",
+  "schemaVersion": 39,
+  "tags": [
+    "plex"
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "poll",
+        "type": "constant",
+        "query": "30",
+        "hide": 2
+      },
+      {
+        "name": "crit",
+        "type": "custom",
+        "query": "70,80,85,90,95",
+        "label": "Umbral %",
+        "current": {
+          "text": "85",
+          "value": "85"
+        },
+        "options": []
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Uso de Plex",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Viendo ahora",
+      "description": "",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "plexfair"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 4,
+        "h": 5
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "plexfair"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT ts AS time, playing AS \"Viendo ahora\" FROM poll ORDER BY ts DESC LIMIT 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "green"
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Pico de simultáneos",
+      "description": "Máximo de personas reproduciendo a la vez en el periodo, y cuándo fue.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "plexfair"
+      },
+      "gridPos": {
+        "x": 4,
+        "y": 1,
+        "w": 4,
+        "h": 5
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "plexfair"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT ts AS time, 'el ' || to_char(ts AT TIME ZONE 'Europe/Madrid', 'DD/MM HH24:MI') AS metric, playing AS value\nFROM poll WHERE $__timeFilter(ts) ORDER BY playing DESC, ts DESC LIMIT 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "purple"
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value_and_name",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Media cuando hay uso",
+      "description": "Personas viendo a la vez de media, contando solo los momentos en que alguien ve algo.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "plexfair"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 1,
+        "w": 4,
+        "h": 5
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "plexfair"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT round(avg(playing) FILTER (WHERE playing > 0), 1) AS \"Media con uso\" FROM poll WHERE $__timeFilter(ts)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Horas vistas",
+      "description": "",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "plexfair"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 1,
+        "w": 4,
+        "h": 5
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "plexfair"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT round(count(*) * $poll / 3600.0) AS \"Horas vistas\" FROM session_sample WHERE $__timeFilter(ts) AND state = 'playing'"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Usuarios activos",
+      "description": "",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "plexfair"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 1,
+        "w": 4,
+        "h": 5
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "plexfair"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT count(DISTINCT user_name) AS \"Usuarios activos\" FROM session_sample WHERE $__timeFilter(ts) AND state = 'playing'"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Pico de transcodes",
+      "description": "Máximo de transcodes a la vez. Son los únicos streams que usan la GPU.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "plexfair"
+      },
+      "gridPos": {
+        "x": 20,
+        "y": 1,
+        "w": 4,
+        "h": 5
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "plexfair"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT ts AS time, CASE WHEN transcodes > 0 THEN 'el ' || to_char(ts AT TIME ZONE 'Europe/Madrid', 'DD/MM HH24:MI') ELSE 'ninguno' END AS metric, transcodes AS value\nFROM poll WHERE $__timeFilter(ts) ORDER BY transcodes DESC, ts DESC LIMIT 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "orange"
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value_and_name",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "id": 8,
+      "type": "row",
+      "title": "Ocupación de los recursos",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "x": 0,
+        "y": 6,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "id": 9,
+      "type": "table",
+      "title": "Ocupación de los recursos",
+      "description": "p95: el 95 % del tiempo estuvo por debajo de este valor. Estado según el p95: Sobrado <50 %, Holgado 50-70 %, Vigilar 70-85 %, Al límite >=85 %. 'Causa del pico' dice si el pico fue con gente viendo o por una tarea de fondo, y qué contenedor usaba CPU en ese momento.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "plexfair"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 7,
+        "w": 24,
+        "h": 12
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "plexfair"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH r AS (\n  SELECT rs.resource, rs.ts, rs.pct, rs.used, rs.capacity, rs.unit, p.playing, p.transcodes\n  FROM resource_sample rs JOIN poll p ON p.ts = rs.ts\n  WHERE $__timeFilter(rs.ts) AND rs.resource NOT IN ('CPU núcleo más cargado', 'GPU')\n), s AS (\n  SELECT resource, max(capacity) AS cap, max(unit) AS unit,\n    percentile_cont(0.95) WITHIN GROUP (ORDER BY pct) AS p95,\n    percentile_cont(0.95) WITHIN GROUP (ORDER BY used) AS p95_used,\n    max(pct) AS peak, max(used) AS peak_used\n  FROM r GROUP BY resource\n), pk AS (\n  -- the moment of the peak, to explain what caused it\n  SELECT DISTINCT ON (resource) resource, ts, playing, transcodes FROM r ORDER BY resource, pct DESC, ts DESC\n)\nSELECT s.resource AS \"Recurso\",\n  trim_scale(round(s.cap::numeric, 1)) || ' ' || s.unit AS \"Capacidad\",\n  CASE WHEN s.unit = '°C' THEN round(s.p95_used::numeric) || ' °C' ELSE round(s.p95::numeric, 1) || ' %' END AS \"p95\",\n  CASE WHEN s.unit = '°C' THEN round(s.peak_used::numeric) || ' °C' ELSE round(s.peak::numeric, 1) || ' %' END AS \"Pico\",\n  pk.ts AS \"Cuándo\",\n  CASE WHEN pk.playing > 0\n       THEN 'con ' || pk.playing || ' stream' || CASE WHEN pk.playing > 1 THEN 's' ELSE '' END\n            || CASE WHEN pk.transcodes > 0 THEN ' (' || pk.transcodes || ' transcode)' ELSE '' END\n       ELSE 'tarea de fondo' END\n  || coalesce(' · ' || (SELECT c.name FROM container_sample c\n                         WHERE c.ts BETWEEN pk.ts - interval '1 minute' AND pk.ts + interval '1 minute'\n                         GROUP BY c.name HAVING avg(c.cpu_pct) >= 1 ORDER BY avg(c.cpu_pct) DESC LIMIT 1), '') AS \"Causa del pico\",\n  CASE WHEN s.p95 >= 85 THEN 'Al límite' WHEN s.p95 >= 70 THEN 'Vigilar' WHEN s.p95 >= 50 THEN 'Holgado' ELSE 'Sobrado' END AS \"Estado\"\nFROM s JOIN pk USING (resource)\nORDER BY CASE\n  WHEN s.resource = 'CPU' THEN 1 WHEN s.resource = 'RAM' THEN 2 WHEN s.resource LIKE 'RAM transcode%' THEN 3\n  WHEN s.resource LIKE 'GPU%' THEN 4 WHEN s.resource LIKE 'Red%' THEN 5 WHEN s.resource LIKE 'Internet%' THEN 6 ELSE 7 END,\n  s.resource"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Estado"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "Sobrado": {
+                        "color": "green",
+                        "index": 0
+                      },
+                      "Holgado": {
+                        "color": "blue",
+                        "index": 1
+                      },
+                      "Vigilar": {
+                        "color": "yellow",
+                        "index": 2
+                      },
+                      "Al límite": {
+                        "color": "red",
+                        "index": 3
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Cuándo"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeAsLocal"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {}
+    },
+    {
+      "id": 10,
+      "type": "row",
+      "title": "Margen: cuántos streams más caben",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "x": 0,
+        "y": 19,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "Streams direct play extra",
+      "description": "Cuántas personas más podrían ver algo en direct play a la vez antes de que algún recurso llegue al umbral. Debajo, el recurso que llegaría primero.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "plexfair"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 20,
+        "w": 8,
+        "h": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "plexfair"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "WITH r AS (\n  SELECT rs.resource, rs.pct, rs.used, rs.capacity, rs.unit,\n    CASE WHEN rs.resource LIKE 'GPU%' OR rs.resource LIKE 'RAM transcode%' THEN p.transcodes ELSE p.playing END AS n\n  FROM resource_sample rs JOIN poll p ON p.ts = rs.ts\n  WHERE $__timeFilter(rs.ts) AND rs.resource NOT IN ('GPU temperatura', 'CPU núcleo más cargado', 'GPU')\n), s AS (\n  SELECT resource, max(capacity) AS cap, max(unit) AS unit, max(used) AS max_used,\n    percentile_cont(0.95) WITHIN GROUP (ORDER BY pct) AS p95,\n    percentile_cont(0.5) WITHIN GROUP (ORDER BY pct) FILTER (WHERE n = 0) AS idle,\n    avg(pct) FILTER (WHERE n > 0) AS busy,\n    avg(n) FILTER (WHERE n > 0) AS avg_n\n  FROM r GROUP BY resource\n), k AS (\n  SELECT *,\n    CASE WHEN resource LIKE 'GPU%' OR resource LIKE 'RAM transcode%' THEN 'Transcode' ELSE 'Direct play' END AS kind,\n    (busy - coalesce(idle, 0)) / nullif(avg_n, 0) AS per_stream\n  FROM s\n), e AS (\n  SELECT *,\n    CASE\n      -- the NVIDIA consumer driver caps simultaneous encodes, that's a hard limit, not a %\n      WHEN resource = 'GPU sesiones NVENC' THEN greatest(cap - max_used, 0)::int\n      -- RAM goes up and down mostly because of other containers (torrents...), so the per-stream\n      -- estimate is just noise. Plex uses very little RAM per direct play, I don't count it as a limit.\n      WHEN resource = 'RAM' THEN NULL\n      WHEN avg_n IS NULL THEN NULL\n      WHEN per_stream > 0.5 THEN greatest(floor(($crit - p95) / per_stream), 0)::int\n      ELSE NULL END AS extra\n  FROM k\n)\nSELECT now() AS time, 'límite: ' || resource AS metric, extra AS value FROM e\nWHERE kind = 'Direct play' AND extra IS NOT NULL ORDER BY extra LIMIT 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "green"
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value_and_name",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "Transcodes extra",
+      "description": "Cuántos transcodes más a la vez caben antes del límite de la GPU (codificador o las 8 sesiones del driver).",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "plexfair"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 20,
+        "w": 8,
+        "h": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "plexfair"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "WITH r AS (\n  SELECT rs.resource, rs.pct, rs.used, rs.capacity, rs.unit,\n    CASE WHEN rs.resource LIKE 'GPU%' OR rs.resource LIKE 'RAM transcode%' THEN p.transcodes ELSE p.playing END AS n\n  FROM resource_sample rs JOIN poll p ON p.ts = rs.ts\n  WHERE $__timeFilter(rs.ts) AND rs.resource NOT IN ('GPU temperatura', 'CPU núcleo más cargado', 'GPU')\n), s AS (\n  SELECT resource, max(capacity) AS cap, max(unit) AS unit, max(used) AS max_used,\n    percentile_cont(0.95) WITHIN GROUP (ORDER BY pct) AS p95,\n    percentile_cont(0.5) WITHIN GROUP (ORDER BY pct) FILTER (WHERE n = 0) AS idle,\n    avg(pct) FILTER (WHERE n > 0) AS busy,\n    avg(n) FILTER (WHERE n > 0) AS avg_n\n  FROM r GROUP BY resource\n), k AS (\n  SELECT *,\n    CASE WHEN resource LIKE 'GPU%' OR resource LIKE 'RAM transcode%' THEN 'Transcode' ELSE 'Direct play' END AS kind,\n    (busy - coalesce(idle, 0)) / nullif(avg_n, 0) AS per_stream\n  FROM s\n), e AS (\n  SELECT *,\n    CASE\n      -- the NVIDIA consumer driver caps simultaneous encodes, that's a hard limit, not a %\n      WHEN resource = 'GPU sesiones NVENC' THEN greatest(cap - max_used, 0)::int\n      -- RAM goes up and down mostly because of other containers (torrents...), so the per-stream\n      -- estimate is just noise. Plex uses very little RAM per direct play, I don't count it as a limit.\n      WHEN resource = 'RAM' THEN NULL\n      WHEN avg_n IS NULL THEN NULL\n      WHEN per_stream > 0.5 THEN greatest(floor(($crit - p95) / per_stream), 0)::int\n      ELSE NULL END AS extra\n  FROM k\n)\nSELECT now() AS time, 'límite: ' || resource AS metric, extra AS value FROM e\nWHERE kind = 'Transcode' AND extra IS NOT NULL ORDER BY extra LIMIT 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "orange"
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value_and_name",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "id": 999,
+      "type": "text",
+      "title": "Cómo leerlo",
+      "gridPos": {
+        "x": 16,
+        "y": 20,
+        "w": 8,
+        "h": 6
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "- **Direct play** no usa la GPU: lo limitan CPU, RAM, discos y red.\n- **Transcode** usa la GPU y la RAM de transcode: el límite duro son las **8 sesiones** del driver de NVIDIA.\n- La estimación mejora con más días de datos y con momentos de varios streams a la vez.\n- **Discos**: en la práctica el límite llega antes si 5-6 personas ven 4K pesado **del mismo disco**."
+      }
+    },
+    {
+      "id": 13,
+      "type": "table",
+      "title": "Margen por recurso",
+      "description": "Consumo por stream = uso medio con gente viendo menos uso en reposo, dividido entre streams. Streams extra = cuántos más caben partiendo del p95 hasta el umbral.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "plexfair"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 26,
+        "w": 24,
+        "h": 11
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "plexfair"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH r AS (\n  SELECT rs.resource, rs.pct, rs.used, rs.capacity, rs.unit,\n    CASE WHEN rs.resource LIKE 'GPU%' OR rs.resource LIKE 'RAM transcode%' THEN p.transcodes ELSE p.playing END AS n\n  FROM resource_sample rs JOIN poll p ON p.ts = rs.ts\n  WHERE $__timeFilter(rs.ts) AND rs.resource NOT IN ('GPU temperatura', 'CPU núcleo más cargado', 'GPU')\n), s AS (\n  SELECT resource, max(capacity) AS cap, max(unit) AS unit, max(used) AS max_used,\n    percentile_cont(0.95) WITHIN GROUP (ORDER BY pct) AS p95,\n    percentile_cont(0.5) WITHIN GROUP (ORDER BY pct) FILTER (WHERE n = 0) AS idle,\n    avg(pct) FILTER (WHERE n > 0) AS busy,\n    avg(n) FILTER (WHERE n > 0) AS avg_n\n  FROM r GROUP BY resource\n), k AS (\n  SELECT *,\n    CASE WHEN resource LIKE 'GPU%' OR resource LIKE 'RAM transcode%' THEN 'Transcode' ELSE 'Direct play' END AS kind,\n    (busy - coalesce(idle, 0)) / nullif(avg_n, 0) AS per_stream\n  FROM s\n), e AS (\n  SELECT *,\n    CASE\n      -- the NVIDIA consumer driver caps simultaneous encodes, that's a hard limit, not a %\n      WHEN resource = 'GPU sesiones NVENC' THEN greatest(cap - max_used, 0)::int\n      -- RAM goes up and down mostly because of other containers (torrents...), so the per-stream\n      -- estimate is just noise. Plex uses very little RAM per direct play, I don't count it as a limit.\n      WHEN resource = 'RAM' THEN NULL\n      WHEN avg_n IS NULL THEN NULL\n      WHEN per_stream > 0.5 THEN greatest(floor(($crit - p95) / per_stream), 0)::int\n      ELSE NULL END AS extra\n  FROM k\n)\nSELECT kind AS \"Tipo de stream\", resource AS \"Recurso\",\n  CASE WHEN resource = 'GPU sesiones NVENC' THEN '1 sesión'\n       WHEN per_stream IS NULL THEN '—' ELSE round(per_stream::numeric, 1) || ' %' END AS \"Consumo por stream\",\n  CASE WHEN resource = 'GPU sesiones NVENC' THEN round(max_used) || ' de ' || round(cap) || ' en uso (pico)'\n       ELSE round(p95::numeric, 1) || ' %' END AS \"Uso p95\",\n  coalesce(extra::text, CASE WHEN avg_n IS NULL THEN 'faltan datos' ELSE 'sin límite a la vista' END) AS \"Streams extra que caben\",\n  CASE WHEN resource = 'GPU sesiones NVENC' THEN 'Límite fijo del driver NVIDIA: transcodes a la vez'\n       WHEN resource LIKE 'Disco%' THEN 'Por disco. Llega antes si varios 4K pesados leen del mismo disco'\n       WHEN resource LIKE 'Internet%' THEN 'Tu subida; la bajada de cada usuario puede limitar antes'\n       WHEN resource = 'RAM' THEN 'No se estima: la RAM la mueven sobre todo otros contenedores. Plex gasta muy poca por stream; vigila el p95'\n       ELSE '' END AS \"Nota\"\nFROM e ORDER BY kind, extra NULLS LAST, resource"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    }
+  ]
+}
